@@ -19,7 +19,7 @@ namespace ConsoleApp1
 
     public class App
     {
-        public Cpu cpu = new Cpu();
+        public Cpu cpu;
         public uint
             ccd_fuse = 0,
             ccd_fuse2 = 0,
@@ -35,9 +35,12 @@ namespace ConsoleApp1
             }
             else
             {
+                cpu = new Cpu();
                 string cmd = args[1];
-                if (cmd == "fuses")
+                if (cmd == "info")
                 {
+                    Console.WriteLine($"CPU: {cpu.info.cpuName} - CMD: {cmd}");
+                } else if (cmd == "fuses") {
                     GetDisCores();
                     Console.WriteLine($"CPU: {cpu.info.cpuName} - CMD: {cmd}");
                     Console.WriteLine("-------------------------");
@@ -52,18 +55,19 @@ namespace ConsoleApp1
 
         public void GetDisCores()
         {
-            uint ccds_total,
-                ccds_disabled,
-                ccd1_fuse,
-                ccd2_fuse;
+            uint    ccds_total,
+                    ccds_disabled,
+                    ccd1_fuse,
+                    ccd2_fuse;
+            bool res;
 
             switch (cpu.info.codeName)
             {
                 case Cpu.CodeName.Vermeer:
-                    ccd_fuse = cpu.ReadDword(0x5D218);
-                    ccd_fuse2 = cpu.ReadDword(0x5D21C);
-                    core_fuse1 = cpu.ReadDword(0x30081D98);
-                    core_fuse2 = cpu.ReadDword(0x32081D98);
+                    res = cpu.ReadDwordEx(0x5D218, ref ccd_fuse);
+                    res = cpu.ReadDwordEx(0x5D21C, ref ccd_fuse2);
+                    res = cpu.ReadDwordEx(0x30081D98, ref core_fuse1);
+                    res = cpu.ReadDwordEx(0x32081D98, ref core_fuse2);
                     break;
 
                 case Cpu.CodeName.Cezanne:
@@ -73,10 +77,16 @@ namespace ConsoleApp1
                     break;
 
                 case Cpu.CodeName.Raphael:
-                    ccd_fuse = cpu.ReadDword(0x5D3BC);
-                    ccd_fuse2 = cpu.ReadDword(0x5D3C0);
-                    core_fuse1 = cpu.ReadDword(0x30081CD0);
-                    core_fuse2 = cpu.ReadDword(0x32081CD0);
+                    if (!cpu.ReadDwordEx(0x5D3BC, ref ccd_fuse))
+                    {
+                        throw new Exception("Bla bla");
+                    }
+                    if (!cpu.ReadDwordEx(0x30081CD0, ref core_fuse1)) {
+                        throw new Exception("Bla bla");
+                    }
+                    if (!cpu.ReadDwordEx(0x32081CD0, ref core_fuse2)) {
+                        throw new Exception("Bla bla");
+                    }
                     break;
 
                 default:
