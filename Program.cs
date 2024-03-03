@@ -44,10 +44,8 @@ namespace ConsoleApp1
                     GetDisCores();
                     Console.WriteLine($"CPU: {cpu.info.cpuName} - CMD: {cmd}");
                     Console.WriteLine("-------------------------");
-                    Console.WriteLine($"CCDs Fuse1 {ccd_fuse:X8}");
-                    Console.WriteLine($"CCDs Fuse2 {ccd_fuse2:X8}");
-                    Console.WriteLine($"Core Fuse1 {core_fuse1:X8}");
-                    Console.WriteLine($"Core Fuse2 {core_fuse1:X8}");
+                    Console.WriteLine($"CCDs disabled mask: {cpu.info.topology.ccdDisabledMap:X8}");
+                    Console.WriteLine($"Core disabled mask {cpu.info.topology.coreDisableMap:X8}");
                 }
             }
             cpu.Dispose();
@@ -59,7 +57,7 @@ namespace ConsoleApp1
                     ccds_disabled,
                     ccd1_fuse,
                     ccd2_fuse;
-            bool res;
+/*            bool res;
 
             switch (cpu.info.codeName)
             {
@@ -91,7 +89,7 @@ namespace ConsoleApp1
 
                 default:
                     break;
-            }
+            }*/
 
             ccds_total = BitSlice(ccd_fuse, 22, 23);
             ccds_disabled = BitSlice(ccd_fuse, 30, 31);
