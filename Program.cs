@@ -44,7 +44,11 @@ namespace ConsoleApp1
                     GetDisCores();
                     Console.WriteLine($"CPU: {cpu.info.cpuName} - CMD: {cmd}");
                     Console.WriteLine("-------------------------");
-                    Console.WriteLine($"CCDs disabled mask: {cpu.info.topology.ccdDisabledMap:X8}");
+                    Console.WriteLine($"Core disabled mask {cpu.info.topology.ccdEnableMap:X8}");
+                    Console.WriteLine($"Core disabled mask {cpu.info.topology.ccdDisableMap:X8}");
+                    Console.WriteLine($"Core disabled mask {cpu.info.topology.fuse1:X8}");
+                    Console.WriteLine($"Core disabled mask {cpu.info.topology.fuse2:X8}");
+                    Console.WriteLine($"Core disabled mask {cpu.info.topology.coreFuse:X8}");
                     Console.WriteLine($"Core disabled mask {cpu.info.topology.coreDisableMap:X8}");
                 }
             }
