@@ -1,9 +1,9 @@
 ﻿using System;
 using ZenStates.Core;
-using System.Collections.Generic;
-using System.Text;
-using System.Threading;
-
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Reflection;
+using System.Diagnostics.Eventing.Reader;
 
 namespace ConsoleApp1
 {
@@ -11,93 +11,27 @@ namespace ConsoleApp1
     {
         static void Main(string[] args)
         {
-            Console.WriteLine("Hello!");
             App app = new App();
             app.Start();
         }
     }
 
-    public class App
+    public class CPUCores
     {
-        public Cpu cpu;
-        public uint
-            ccd_fuse = 0,
-            ccd_fuse2 = 0,
-            core_fuse1 = 0,
-            core_fuse2 = 0;
-        public App() { }
-        public void Start()
-        {
-            string[] args = Environment.GetCommandLineArgs();
-            if (args.Length < 2)
-            {
-                Console.WriteLine("No CMD given. Bye!");
-            }
-            else
-            {
-                cpu = new Cpu();
-                string cmd = args[1];
-                if (cmd == "info")
-                {
-                    Console.WriteLine($"CPU: {cpu.info.cpuName} - CMD: {cmd}");
-                } else if (cmd == "fuses") {
-                    GetDisCores();
-                    Console.WriteLine($"CPU: {cpu.info.cpuName} - CMD: {cmd}");
-                    Console.WriteLine("-------------------------");
-                    Console.WriteLine($"CCDs enabled mask {cpu.info.topology.ccdEnableMap:X8}");
-                    Console.WriteLine($"CCDs disabled mask {cpu.info.topology.ccdDisableMap:X8}");
-                    Console.WriteLine($"Core fuse {cpu.info.topology.coreFuse:X8}");
-                    Console.WriteLine($"Core disabled mask {cpu.info.topology.coreDisableMap:X8}");
-                }
-            }
-            cpu.Dispose();
-        }
+        public int
+            ccd_total,
+            ccd_active,
+            cores_per_ccd,
+            cores_count,
+            core_num;
+        bool isAPU,
+            isVermeer,
+            isRaphael;
+        public int[] ID_map;
+        public int[] curve;
+        protected readonly Cpu cpu;
+        public string cpuName;
 
-        public void GetDisCores()
-        {
-            uint    ccds_total,
-                    ccds_disabled,
-                    ccd1_fuse,
-                    ccd2_fuse;
-/*            bool res;
-
-            switch (cpu.info.codeName)
-            {
-                case Cpu.CodeName.Vermeer:
-                    res = cpu.ReadDwordEx(0x5D218, ref ccd_fuse);
-                    res = cpu.ReadDwordEx(0x5D21C, ref ccd_fuse2);
-                    res = cpu.ReadDwordEx(0x30081D98, ref core_fuse1);
-                    res = cpu.ReadDwordEx(0x32081D98, ref core_fuse2);
-                    break;
-
-                case Cpu.CodeName.Cezanne:
-                    ccd_fuse = 0x80400000;
-                    core_fuse1 = (cpu.ReadDword(0x5D448) >> 11) & 0xFF | 0x300;
-                    core_fuse2 = 0xFFFFFFFF;
-                    break;
-
-                case Cpu.CodeName.Raphael:
-                    if (!cpu.ReadDwordEx(0x5D3BC, ref ccd_fuse))
-                    {
-                        throw new Exception("Bla bla");
-                    }
-                    if (!cpu.ReadDwordEx(0x30081CD0, ref core_fuse1)) {
-                        throw new Exception("Bla bla");
-                    }
-                    if (!cpu.ReadDwordEx(0x32081CD0, ref core_fuse2)) {
-                        throw new Exception("Bla bla");
-                    }
-                    break;
-
-                default:
-                    break;
-            }*/
-
-            ccds_total = BitSlice(ccd_fuse, 22, 23);
-            ccds_disabled = BitSlice(ccd_fuse, 30, 31);
-            ccd1_fuse = BitSlice(core_fuse1, 0, 7);
-            ccd2_fuse = BitSlice(core_fuse2, 0, 7);
-        }
         static uint BitSlice(uint arg, int start, int end)
         {
             uint mask = (2u << (end - start)) - 1;
@@ -113,6 +47,207 @@ namespace ConsoleApp1
                 n >>= 1;
             }
             return (int)count;
+        }
+
+        public CPUCores()
+        {
+            cpu = new Cpu();
+            cpuName = cpu.info.cpuName;
+            isAPU = cpu.info.codeName == Cpu.CodeName.Cezanne;
+            isVermeer = cpu.info.codeName == Cpu.CodeName.Vermeer;
+            isRaphael = cpu.info.codeName == Cpu.CodeName.Raphael;
+        }
+
+        ~CPUCores() { 
+            cpu.Dispose();
+        }
+
+        public SMU.Status sendSmuCommand(Mailbox mbox, uint msg, ref uint[] args)
+        {
+            return cpu.smu.SendSmuCommand(mbox, msg, ref args);
+        }
+
+        public (uint, uint) getDisCores()
+        {
+            uint
+                ccd_fuse1,
+                coreDis1_m,
+                coreDis2_m,
+                ccd_enabled_m,
+                ccd_dis_m;
+
+            ccd_fuse1 = cpu.info.topology.ccdsPresent;
+            ccd_enabled_m = BitSlice(ccd_fuse1, 22, 23);
+            ccd_dis_m = BitSlice(ccd_fuse1, 30, 31);
+            ccd_total = countSetBits(ccd_enabled_m);
+
+
+            coreDis1_m = cpu.info.topology.coreDisableMap[0] & 0xFF;
+            coreDis2_m = ccd_total > 1
+                ? cpu.info.topology.coreDisableMap[1] & 0xFF
+                : 0xFF;
+
+            uint cores_layout = coreDis1_m | (coreDis2_m << 8) | 0xFFFF0000;
+            core_num = countSetBits(~cores_layout);
+
+
+            // in Raphael ccd_fuse_down probably not used and always zero
+            ccd_active = cpu.info.codeName == Cpu.CodeName.Raphael
+                ? ccd_total
+                : (ccd_dis_m > 0 ? 1 : 2);
+
+            cores_per_ccd = (coreDis1_m == 0 || coreDis2_m == 0) ? 8 : 6;
+
+            makeMap(core_num, cores_layout);
+            curve = new int[ccd_active * cores_per_ccd];
+            return (ccd_fuse1, cores_layout);
+        }
+
+        public void makeMap(int num, uint layout)
+        {
+            uint cores_t = layout;
+            ID_map = new int[num];
+            for (int i = 0, k = 0; i < ccd_total * 8; i++, cores_t = cores_t >> 1)
+                if ((cores_t & 1) == 0)
+                    ID_map[k++] = i;
+        }
+
+        public void SetPsmMargin(int core_id = 0, int count = 0)
+        {
+            uint MSG = cpu.smu.Rsmu.SMU_MSG_SetDldoPsmMargin;
+            uint[] args = new uint[6];
+            args[0] = (uint)(((core_id & 8) << 5 | (core_id & 7)) << 20 | count & 0xFFFF);
+            try
+            {
+#if DEBUG
+            //    ConsoleLog($"Set psm margin {args[0]} for core ${core_id}");
+#endif
+                SMU.Status status = sendSmuCommand(cpu.smu.Rsmu, MSG, ref args);
+            }
+            catch (ApplicationException ex)
+            {
+                HandleError(ex.Message, "Error reading response");
+            }
+        }
+
+        public int GetPsmMargin(int core_id)
+        {
+            uint MSG = cpu.smu.Rsmu.SMU_MSG_GetDldoPsmMargin;
+            uint[] args = new uint[6];
+
+            args[0] = isAPU
+                ? (uint)core_id
+                : (uint)((core_id & 8) << 5 | (core_id & 7)) << 20;
+            try
+            {
+                SMU.Status status = sendSmuCommand(cpu.smu.Rsmu, MSG, ref args);
+            }
+            catch (ApplicationException ex)
+            {
+                HandleError(ex.Message, "Error reading response");
+            }
+            return (int)args[0];
+        }
+
+        private void HandleError(string message, string title = "Error")
+        {
+            Console.WriteLine("Error: " + message);
+        }
+
+        public void HandleCurve(string cmd, ref string[] curve_d)
+        {
+
+            if (cmd == "get") {
+                try
+                {
+                    for (int i = 0; i < curve.Length; i++)
+                    {
+                        int cnt = GetPsmMargin(ID_map[i]);
+                        curve_d[i] = cnt.ToString();
+                    }
+                }
+                catch
+                {
+                    Environment.Exit(999);
+                    throw new ApplicationException($"Error reading CO values: ");
+                }
+            }
+            else if (cmd == "set")
+            {
+                try
+                {
+                    for (int i = 0; i < curve.Length; i++)
+                    {
+                        int count = Int32.Parse(curve_d[i]);
+                        int coreID = ID_map[i];
+
+                        SetPsmMargin(coreID, count);
+                    }
+                }
+                catch
+                {
+                    Environment.Exit(999);
+                    throw new ApplicationException($"Invalid 'count' values: '{curve_d}'");
+                }
+            }
+        }
+
+    }
+
+    public class App
+    {
+        public uint
+            ccd_fuse = 0,
+            ccd_fuse2 = 0,
+            core_fuse1 = 0,
+            core_fuse2 = 0;
+
+        public CPUCores _cpu_;
+        public App() {
+
+        }
+
+        public void Start()
+        {
+            string[] args = Environment.GetCommandLineArgs();
+            string res = "", cmd = "";
+
+            _cpu_ = new CPUCores();
+            _cpu_.getDisCores();
+
+            int cores = _cpu_.core_num;
+
+            string[] curve_data;
+
+            if (args.Length > 1)
+                cmd = args[1]; 
+
+            curve_data = new string[cores];
+
+            if (args.Length == cores + 2 || args.Length == 2) 
+            { 
+                // copy CO values from arg string
+                if (cmd == "set")
+                {
+                    for (int i = 0; i < cores; i++)
+                        curve_data[i] = args[i + 2];
+                }
+
+                if (cmd == "info")
+                {
+                    res = _cpu_.cpuName;
+                }
+                else if (cmd == "get" || cmd == "set")
+                {
+                    _cpu_.HandleCurve(cmd, ref curve_data);
+                    res = string.Join(" ", curve_data);
+                }
+                Console.WriteLine($"{res}");
+            }
+            else
+            {
+                Console.WriteLine($"Error: Wrong arguments count {args.Length}");
+            }
         }
     }
 }
