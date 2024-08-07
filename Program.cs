@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Reflection;
 using System.Diagnostics.Eventing.Reader;
+using System.Net;
 
 namespace ConsoleApp1
 {
@@ -216,37 +217,35 @@ namespace ConsoleApp1
             _cpu_.getDisCores();
 
             int cores = _cpu_.core_num;
-
             string[] curve_data;
 
-            if (args.Length > 1)
-                cmd = args[1]; 
-
+            cmd = (args.Length > 1) ? args[1] : "info";           
             curve_data = new string[cores];
 
-            if (args.Length == cores + 2 || args.Length == 2) 
-            { 
-                // copy CO values from arg string
-                if (cmd == "set")
-                {
-                    for (int i = 0; i < cores; i++)
-                        curve_data[i] = args[i + 2];
-                }
-
-                if (cmd == "info")
-                {
-                    res = _cpu_.cpuName;
-                }
-                else if (cmd == "get" || cmd == "set")
-                {
-                    _cpu_.HandleCurve(cmd, ref curve_data);
-                    res = string.Join(" ", curve_data);
-                }
-                Console.WriteLine($"{res}");
-            }
-            else
+            if (cmd == "set" && args.Length != cores + 2) 
             {
                 Console.WriteLine($"Error: Wrong arguments count {args.Length}");
+            } 
+            else
+            {
+                switch (cmd)
+                {
+                    case "info":
+                        res = _cpu_.cpuName;
+                        break;
+                    case "set":
+                    case "get":
+                        if (cmd == "set")  
+                            for (int i = 0; i < cores; i++) curve_data[i] = args[i + 2];
+                        _cpu_.HandleCurve(cmd, ref curve_data);
+                        res = string.Join(" ", curve_data);
+                        break;
+                    default:
+                        Console.WriteLine($"Error: unknown command: {cmd}");
+                        break;
+                }
+                if (res != "") 
+                    Console.WriteLine($"{res}");
             }
         }
     }
